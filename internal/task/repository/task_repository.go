@@ -3,10 +3,6 @@ package repository
 import (
 	"database/sql"
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
-	"test/configs"
 	"test/internal/task"
 )
 
@@ -14,124 +10,87 @@ type TaskRepository struct {
 	db *sql.DB
 }
 
-func NewTaskRepository(dbConfig *configs.Database) (error, *TaskRepository) {
-	install := false
-
-	appPath, err := os.Executable()
-	if err != nil {
-		return err, nil
-	}
-	dbFile := filepath.Join(filepath.Dir(appPath), dbConfig.DatabaseName)
-	_, err = os.Stat(dbFile)
-
-	if err != nil {
-		install = true
-	}
-
-	if !install {
-		db, err := sql.Open(dbConfig.DriverName, dbConfig.DatabaseName)
-		if err != nil {
-			return err, nil
-		}
-
-		log.Print("Database initialized")
-
-		return nil, &TaskRepository{
-			db: db,
-		}
-	}
-
-	db, err := sql.Open(dbConfig.DriverName, dbConfig.DatabaseName)
-	if err != nil {
-		return err, nil
-	}
-
-	_, err = db.Exec("CREATE TABLE IF NOT EXISTS scheduler (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, date VARCHAR NOT NULL, title VARCHAR NOT NULL, comment VARCHAR NOT NULL,  repeat VARCHAR(128) NOT NULL)")
-	if err != nil {
-		return err, nil
-	}
-
-	_, err = db.Exec("CREATE INDEX IF NOT EXISTS idx_scheduler_date ON scheduler (date)")
-	if err != nil {
-		return err, nil
-	}
-
-	log.Print("Database initialized")
-
-	return nil, &TaskRepository{
+func NewTaskRepository(db *sql.DB) *TaskRepository {
+	return &TaskRepository{
 		db: db,
 	}
 }
 
-func (ts *TaskRepository) Insert(task *task.Task) (error, string) {
-	query := "insert into scheduler (date, title, comment, repeat) values ($1, $2, $3, $4)"
+func (ts *TaskRepository) Insert(task *task.Task) (string, error) {
+	query := "INSERT INTO scheduler (date, title, comment, repeat) VALUES ($1, $2, $3, $4)"
 	res, err := ts.db.Exec(query, task.Date, task.Title, task.Comment, task.Repeat)
 	if err != nil {
-		return err, ""
+		return "", err
 	}
 
 	id, err := res.LastInsertId()
 	if err != nil {
-		return err, ""
+		return "", err
 	}
 
-	return nil, fmt.Sprint(id)
+	return fmt.Sprint(id), nil
 }
 
-func (ts *TaskRepository) GetAll() (error, *task.List) {
-	query := "select * from scheduler order by date"
-	rows, err := ts.db.Query(query)
+func (ts *TaskRepository) GetAll(limit int) (*task.List, error) {
+	query := "SELECT id, date, title, comment, repeat FROM scheduler ORDER BY date LIMIT ?"
+	rows, err := ts.db.Query(query, limit)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
 	return ts.prepareTaskList(rows)
 }
 
-func (ts *TaskRepository) GetByDate(date string) (error, *task.List) {
-	query := "select * from scheduler where `date` = :date"
-	rows, err := ts.db.Query(query, date)
+func (ts *TaskRepository) GetByDate(date string, limit int) (*task.List, error) {
+	query := "SELECT id, date, title, comment, repeat FROM scheduler WHERE `date` = ? LIMIT ?"
+	rows, err := ts.db.Query(query, date, limit)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
 	return ts.prepareTaskList(rows)
 }
 
-func (ts *TaskRepository) GetByTitleOrComment(search string) (error, *task.List) {
-	query := "SELECT * FROM scheduler WHERE (title LIKE ? OR comment LIKE ?) ORDER BY date"
-	rows, err := ts.db.Query(query, "%"+search+"%", "%"+search+"%")
+func (ts *TaskRepository) GetByTitleOrComment(search string, limit int) (*task.List, error) {
+	query := "SELECT id, date, title, comment, repeat FROM scheduler WHERE (title LIKE ? OR comment LIKE ?) ORDER BY date LIMIT ?"
+	rows, err := ts.db.Query(query, "%"+search+"%", "%"+search+"%", limit)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
 	return ts.prepareTaskList(rows)
 }
 
-func (ts *TaskRepository) GetById(id int) (error, *task.Task) {
-	query := "select * from scheduler where id = ?"
+func (ts *TaskRepository) GetById(id int) (*task.Task, error) {
+	query := "SELECT id, date, title, comment, repeat FROM scheduler WHERE id = ?"
 	row := ts.db.QueryRow(query, id)
 	var t task.Task
 	err := row.Scan(&t.ID, &t.Date, &t.Title, &t.Comment, &t.Repeat)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
-	return nil, &t
+	return &t, nil
 }
 
-func (ts *TaskRepository) prepareTaskList(rows *sql.Rows) (error, *task.List) {
+func (ts *TaskRepository) prepareTaskList(rows *sql.Rows) (*task.List, error) {
 	taskList := make([]*task.Task, 0)
+	defer rows.Close()
+
 	for rows.Next() {
 		var taskStruct task.Task
 		err := rows.Scan(&taskStruct.ID, &taskStruct.Date, &taskStruct.Title, &taskStruct.Comment, &taskStruct.Repeat)
 		if err != nil {
-			return err, nil
+			return nil, err
 		}
 		taskList = append(taskList, &taskStruct)
 	}
 
-	return nil, &task.List{Task: taskList}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	return &task.List{Task: taskList}, nil
 }
 
 func (ts *TaskRepository) DeleteById(id int) error {
@@ -144,18 +103,18 @@ func (ts *TaskRepository) DeleteById(id int) error {
 	return nil
 }
 
-func (ts *TaskRepository) UpdateById(t *task.Task) (error, *task.Task) {
-	query := "update scheduler set date = $1, title = $2, comment = $3, repeat = $4 where id = $5"
+func (ts *TaskRepository) UpdateById(t *task.Task) (*task.Task, error) {
+	query := "UPDATE scheduler SET date = $1, title = $2, comment = $3, repeat = $4 WHERE id = $5"
 	_, err := ts.db.Exec(query, t.Date, t.Title, t.Comment, t.Repeat, t.ID)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
-	return nil, t
+	return t, err
 }
 
 func (ts *TaskRepository) Done(task *task.Task) error {
-	query := "update scheduler set date = $1 where id = $2"
+	query := "UPDATE scheduler SET date = $1 WHERE id = $2"
 	_, err := ts.db.Exec(query, task.Date, task.ID)
 	if err != nil {
 		return err

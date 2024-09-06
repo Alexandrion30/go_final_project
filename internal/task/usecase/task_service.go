@@ -6,50 +6,58 @@ import (
 	"strconv"
 	"strings"
 	"test/internal/task"
-	"test/internal/task/repository"
 	"time"
 )
 
-const FormatDate = "20060102"
-
-type TaskService struct {
-	taskRepository *repository.TaskRepository
+type RepositoryInterface interface {
+	Insert(task *task.Task) (string, error)
+	GetAll(limit int) (*task.List, error)
+	GetByDate(date string, limit int) (*task.List, error)
+	GetByTitleOrComment(search string, limit int) (*task.List, error)
+	GetById(id int) (*task.Task, error)
+	DeleteById(id int) error
+	UpdateById(t *task.Task) (*task.Task, error)
+	Done(task *task.Task) error
 }
 
-func NewTaskService(taskRepository *repository.TaskRepository) *TaskService {
+type TaskService struct {
+	taskRepository RepositoryInterface
+}
+
+func NewTaskService(taskRepository RepositoryInterface) *TaskService {
 	return &TaskService{
 		taskRepository: taskRepository,
 	}
 }
 
-func (ts *TaskService) NextDate(now string, date string, repeat string) (string, error) {
+func (ts *TaskService) NextDate(now string, date string, repeat string) (error, string) {
 	if repeat == "" {
-		return "", errors.New("правило пустое")
+		return errors.New("правило пустое"), ""
 	}
 
-	startDate, err := time.Parse(FormatDate, date)
+	startDate, err := time.Parse(task.FormatDate, date)
 	if err != nil {
-		return "", fmt.Errorf("неверный формат даты: %v", err)
+		return fmt.Errorf("неверный формат даты: %v", err), ""
 	}
 
-	nowDate, err := time.Parse(FormatDate, now)
+	nowDate, err := time.Parse(task.FormatDate, now)
 	if err != nil {
-		return "", fmt.Errorf("неверный формат даты %v", err)
+		return fmt.Errorf("неверный формат даты %v", err), ""
 	}
 
 	parts := strings.Fields(repeat)
 	if len(parts) < 1 {
-		return "", errors.New("неверный формат правила повторения")
+		return errors.New("неверный формат правила повторения"), ""
 	}
 
 	switch parts[0] {
 	case "d":
 		if len(parts) != 2 {
-			return "", errors.New("неверный формат правила d")
+			return errors.New("неверный формат правила d"), ""
 		}
 		interval, err := strconv.Atoi(parts[1])
 		if err != nil || interval <= 0 || interval > 365 {
-			return "", errors.New("неверный интервал")
+			return errors.New("неверный интервал"), ""
 		}
 		for {
 			startDate = startDate.AddDate(0, 0, interval)
@@ -59,11 +67,11 @@ func (ts *TaskService) NextDate(now string, date string, repeat string) (string,
 		}
 	case "w":
 		if len(parts) != 2 {
-			return "", errors.New("неверный формат правила w")
+			return errors.New("неверный формат правила w"), ""
 		}
 		interval, err := strconv.Atoi(parts[1])
 		if err != nil || interval < 1 || interval > 7 {
-			return "", errors.New("неверный интервал недели")
+			return errors.New("неверный интервал недели"), ""
 		}
 		for {
 			startDate = startDate.AddDate(0, 0, 1)
@@ -73,19 +81,19 @@ func (ts *TaskService) NextDate(now string, date string, repeat string) (string,
 		}
 	case "m":
 		if len(parts) != 2 {
-			return "", errors.New("неверный формат m")
+			return errors.New("неверный формат m"), ""
 		}
 		dayParts := strings.Split(parts[1], ",")
 		if len(dayParts) != 2 {
-			return "", errors.New("неверные дни месяцев")
+			return errors.New("неверные дни месяцев"), ""
 		}
 		monthOffset, err := strconv.Atoi(dayParts[0])
 		if err != nil {
-			return "", errors.New("ошибка конвертации")
+			return errors.New("ошибка конвертации"), ""
 		}
 		dayOfMonth, err := strconv.Atoi(dayParts[1])
 		if err != nil || dayOfMonth < 1 || dayOfMonth > 31 {
-			return "", errors.New("неверный день месяца")
+			return errors.New("неверный день месяца"), ""
 		}
 		for {
 			startDate = startDate.AddDate(0, monthOffset, 0)
@@ -98,7 +106,7 @@ func (ts *TaskService) NextDate(now string, date string, repeat string) (string,
 		}
 	case "y":
 		if len(parts) != 1 {
-			return "", errors.New("неверный формат правила y")
+			return errors.New("неверный формат правила y"), ""
 		}
 		for {
 			startDate = startDate.AddDate(1, 0, 0)
@@ -107,57 +115,83 @@ func (ts *TaskService) NextDate(now string, date string, repeat string) (string,
 			}
 		}
 	default:
-		return "", errors.New("неизвестный тип правила")
+		return errors.New("неизвестный тип правила"), ""
 	}
 
-	return startDate.Format(FormatDate), nil
+	return nil, startDate.Format(task.FormatDate)
 }
 
-func (ts *TaskService) Create(task *task.Task) (error, string) {
-	err, id := ts.taskRepository.Insert(task)
+func (ts *TaskService) Create(t *task.Task) (string, error) {
+	dateNow := time.Now().Format(task.FormatDate)
+	err := t.ValidateForCreate(dateNow)
 	if err != nil {
-		return err, ""
+		return "", err
 	}
 
-	task.ID = id
+	if t.Repeat == "" || t.Date == dateNow {
+		t.Date = dateNow
+	} else {
+		err, t.Date = ts.NextDate(dateNow, t.Date, t.Repeat)
+		if err != nil {
+			return "", err
+		}
+	}
 
-	return nil, id
+	id, err := ts.taskRepository.Insert(t)
+	if err != nil {
+		return "", err
+	}
+
+	t.ID = id
+
+	return id, nil
 }
 
-func (ts *TaskService) GetAll(search string) (error, *task.List) {
+func (ts *TaskService) GetAll(search string, limit int) (*task.List, error) {
 	if search != "" {
 		_, err := time.Parse("02.01.2006", search)
 		if err == nil {
-			return ts.taskRepository.GetByDate(search)
+			return ts.taskRepository.GetByDate(search, limit)
 		}
 
-		return ts.taskRepository.GetByTitleOrComment(search)
+		return ts.taskRepository.GetByTitleOrComment(search, limit)
 	}
 
-	err, taskList := ts.taskRepository.GetAll()
+	taskList, err := ts.taskRepository.GetAll(limit)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
-	return nil, taskList
+	return taskList, nil
 }
 
-func (ts *TaskService) GetById(id int) (error, *task.Task) {
-	err, t := ts.taskRepository.GetById(id)
+func (ts *TaskService) GetById(id int) (*task.Task, error) {
+	t, err := ts.taskRepository.GetById(id)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
-	return nil, t
+	return t, err
 }
 
-func (ts *TaskService) Update(t *task.Task) (error, *task.Task) {
-	err, t := ts.taskRepository.UpdateById(t)
+func (ts *TaskService) Update(t *task.Task) (*task.Task, error) {
+	dateNow := time.Now().Format(task.FormatDate)
+	err := t.ValidateForCreate(dateNow)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
-	return nil, t
+	err, t.Date = ts.NextDate(dateNow, t.Date, t.Repeat)
+	if err != nil {
+		return nil, err
+	}
+
+	t, err = ts.taskRepository.UpdateById(t)
+	if err != nil {
+		return nil, err
+	}
+
+	return t, nil
 }
 
 func (ts *TaskService) Delete(id int) error {
@@ -177,7 +211,7 @@ func (ts *TaskService) Done(paramId string) error {
 	if err != nil {
 		return errors.New("некорректный параметр id")
 	}
-	err, t := ts.GetById(id)
+	t, err := ts.GetById(id)
 	if err != nil {
 		return errors.New("задача не найдена")
 	}
@@ -190,7 +224,7 @@ func (ts *TaskService) Done(paramId string) error {
 		return nil
 	}
 
-	newDate, err := ts.NextDate(time.Now().Format(FormatDate), t.Date, t.Repeat)
+	err, newDate := ts.NextDate(time.Now().Format(task.FormatDate), t.Date, t.Repeat)
 	if err != nil {
 		return errors.New("ошибка при вычислении даты")
 	}

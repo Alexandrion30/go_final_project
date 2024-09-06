@@ -4,22 +4,30 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	task2 "test/internal/task"
-	"test/internal/task/usecase"
-	"time"
+	"test/internal/task"
 )
 
+type ServiceInterface interface {
+	NextDate(now string, date string, repeat string) (error, string)
+	Create(t *task.Task) (string, error)
+	GetAll(search string, limit int) (*task.List, error)
+	GetById(id int) (*task.Task, error)
+	Update(t *task.Task) (*task.Task, error)
+	Delete(id int) error
+	Done(paramId string) error
+}
+
 type TaskHttp struct {
-	taskService *usecase.TaskService
+	service ServiceInterface
 }
 
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-func NewTaskHttp(taskService *usecase.TaskService) *TaskHttp {
+func NewTaskHttp(service ServiceInterface) *TaskHttp {
 	return &TaskHttp{
-		taskService: taskService,
+		service: service,
 	}
 }
 
@@ -28,7 +36,7 @@ func (th *TaskHttp) HandleTime(w http.ResponseWriter, r *http.Request) {
 	date := r.FormValue("date")
 	repeat := r.FormValue("repeat")
 
-	newDate, err := th.taskService.NextDate(now, date, repeat)
+	err, newDate := th.service.NextDate(now, date, repeat)
 	if err != nil {
 		errorResponse := ErrorResponse{Error: err.Error()}
 		writeResponse(errorResponse, w, true)
@@ -40,47 +48,35 @@ func (th *TaskHttp) HandleTime(w http.ResponseWriter, r *http.Request) {
 }
 
 func (th *TaskHttp) Create(w http.ResponseWriter, r *http.Request) {
-	var task task2.Task
-	err := json.NewDecoder(r.Body).Decode(&task)
+	var t task.Task
+	err := json.NewDecoder(r.Body).Decode(&t)
 	if err != nil {
 		errorResponse := ErrorResponse{Error: "Ошибка десериализации JSON"}
 		writeResponse(errorResponse, w, true)
 		return
 	}
 
-	dateNow := time.Now().Format(usecase.FormatDate)
-	err = ValidateForCreate(&task, dateNow)
+	id, err := th.service.Create(&t)
 	if err != nil {
 		errorResponse := ErrorResponse{Error: err.Error()}
 		writeResponse(errorResponse, w, true)
 		return
 	}
 
-	if task.Repeat == "" || task.Date == dateNow {
-		task.Date = dateNow
-	} else {
-		task.Date, err = th.taskService.NextDate(dateNow, task.Date, task.Repeat)
-		if err != nil {
-			errorResponse := ErrorResponse{Error: err.Error()}
-			writeResponse(errorResponse, w, true)
-			return
-		}
-	}
-
-	err, id := th.taskService.Create(&task)
-	if err != nil {
-		errorResponse := ErrorResponse{Error: err.Error()}
-		writeResponse(errorResponse, w, true)
-		return
-	}
-
-	response := task2.Task{ID: id}
+	response := task.Task{ID: id}
 	writeResponse(response, w, false)
 }
 
 func (th *TaskHttp) GetList(w http.ResponseWriter, r *http.Request) {
 	search := r.FormValue("search")
-	err, taskList := th.taskService.GetAll(search)
+	limit, err := strconv.Atoi(r.FormValue("limit"))
+	if err != nil {
+		errorResponse := ErrorResponse{Error: err.Error()}
+		writeResponse(errorResponse, w, true)
+		return
+	}
+
+	taskList, err := th.service.GetAll(search, limit)
 	if err != nil {
 		errorResponse := ErrorResponse{Error: err.Error()}
 		writeResponse(errorResponse, w, true)
@@ -98,14 +94,14 @@ func (th *TaskHttp) Show(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err, task := th.taskService.GetById(id)
+	t, err := th.service.GetById(id)
 	if err != nil {
 		errorResponse := ErrorResponse{Error: err.Error()}
 		writeResponse(errorResponse, w, true)
 		return
 	}
 
-	writeResponse(task, w, false)
+	writeResponse(t, w, false)
 }
 
 func (th *TaskHttp) Delete(w http.ResponseWriter, r *http.Request) {
@@ -123,41 +119,26 @@ func (th *TaskHttp) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = th.taskService.Delete(id)
+	err = th.service.Delete(id)
 	if err != nil {
 		errorResponse := ErrorResponse{Error: err.Error()}
 		writeResponse(errorResponse, w, true)
 		return
 	}
 
-	writeResponse(task2.Task{}, w, false)
+	writeResponse(task.Task{}, w, false)
 }
 
 func (th *TaskHttp) Edit(w http.ResponseWriter, r *http.Request) {
-	var task task2.Task
-	err := json.NewDecoder(r.Body).Decode(&task)
+	var t task.Task
+	err := json.NewDecoder(r.Body).Decode(&t)
 	if err != nil {
 		errorResponse := ErrorResponse{Error: "Ошибка десериализации JSON"}
 		writeResponse(errorResponse, w, true)
 		return
 	}
 
-	dateNow := time.Now().Format(usecase.FormatDate)
-	err = ValidateForCreate(&task, dateNow)
-	if err != nil {
-		errorResponse := ErrorResponse{Error: err.Error()}
-		writeResponse(errorResponse, w, true)
-		return
-	}
-
-	task.Date, err = th.taskService.NextDate(dateNow, task.Date, task.Repeat)
-	if err != nil {
-		errorResponse := ErrorResponse{Error: err.Error()}
-		writeResponse(errorResponse, w, true)
-		return
-	}
-
-	err, updatedTask := th.taskService.Update(&task)
+	updatedTask, err := th.service.Update(&t)
 	if err != nil {
 		errorResponse := ErrorResponse{Error: err.Error()}
 		writeResponse(errorResponse, w, true)
@@ -169,14 +150,14 @@ func (th *TaskHttp) Edit(w http.ResponseWriter, r *http.Request) {
 
 func (th *TaskHttp) Done(w http.ResponseWriter, r *http.Request) {
 	paramId := r.FormValue("id")
-	err := th.taskService.Done(paramId)
+	err := th.service.Done(paramId)
 	if err != nil {
 		errorResponse := ErrorResponse{Error: err.Error()}
 		writeResponse(errorResponse, w, true)
 		return
 	}
 
-	writeResponse(task2.Task{}, w, false)
+	writeResponse(task.Task{}, w, false)
 }
 
 func writeResponse(data interface{}, w http.ResponseWriter, isError bool) {

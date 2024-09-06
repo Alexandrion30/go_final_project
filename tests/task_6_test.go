@@ -28,7 +28,7 @@ func TestTask(t *testing.T) {
 
 	body, err := requestJSON("api/task", nil, http.MethodGet)
 	assert.NoError(t, err)
-	var m map[string]interface{}
+	var m map[string]string
 	err = json.Unmarshal(body, &m)
 	assert.NoError(t, err)
 
