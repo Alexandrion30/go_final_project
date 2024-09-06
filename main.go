@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/gorilla/mux"
-	_ "github.com/mattn/go-sqlite3"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +15,9 @@ import (
 	"test/internal/task/delivery"
 	"test/internal/task/repository"
 	"test/internal/task/usecase"
+
+	"github.com/gorilla/mux"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func main() {
