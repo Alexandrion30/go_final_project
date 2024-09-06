@@ -31,9 +31,9 @@ func (ts *TaskRepository) Insert(task *task.Task) (string, error) {
 	return fmt.Sprint(id), nil
 }
 
-func (ts *TaskRepository) GetAll(limit int) (*task.List, error) {
-	query := "SELECT id, date, title, comment, repeat FROM scheduler ORDER BY date LIMIT ?"
-	rows, err := ts.db.Query(query, limit)
+func (ts *TaskRepository) GetAll() (*task.List, error) {
+	query := "SELECT id, date, title, comment, repeat FROM scheduler ORDER BY date"
+	rows, err := ts.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -41,9 +41,9 @@ func (ts *TaskRepository) GetAll(limit int) (*task.List, error) {
 	return ts.prepareTaskList(rows)
 }
 
-func (ts *TaskRepository) GetByDate(date string, limit int) (*task.List, error) {
-	query := "SELECT id, date, title, comment, repeat FROM scheduler WHERE `date` = ? LIMIT ?"
-	rows, err := ts.db.Query(query, date, limit)
+func (ts *TaskRepository) GetByDate(date string) (*task.List, error) {
+	query := "SELECT id, date, title, comment, repeat FROM scheduler WHERE `date` = ?"
+	rows, err := ts.db.Query(query, date)
 	if err != nil {
 		return nil, err
 	}
@@ -51,9 +51,9 @@ func (ts *TaskRepository) GetByDate(date string, limit int) (*task.List, error) 
 	return ts.prepareTaskList(rows)
 }
 
-func (ts *TaskRepository) GetByTitleOrComment(search string, limit int) (*task.List, error) {
-	query := "SELECT id, date, title, comment, repeat FROM scheduler WHERE (title LIKE ? OR comment LIKE ?) ORDER BY date LIMIT ?"
-	rows, err := ts.db.Query(query, "%"+search+"%", "%"+search+"%", limit)
+func (ts *TaskRepository) GetByTitleOrComment(search string) (*task.List, error) {
+	query := "SELECT id, date, title, comment, repeat FROM scheduler WHERE (title LIKE ? OR comment LIKE ?) ORDER BY date"
+	rows, err := ts.db.Query(query, "%"+search+"%", "%"+search+"%")
 	if err != nil {
 		return nil, err
 	}

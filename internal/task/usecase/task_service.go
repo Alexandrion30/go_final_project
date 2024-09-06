@@ -11,9 +11,9 @@ import (
 
 type RepositoryInterface interface {
 	Insert(task *task.Task) (string, error)
-	GetAll(limit int) (*task.List, error)
-	GetByDate(date string, limit int) (*task.List, error)
-	GetByTitleOrComment(search string, limit int) (*task.List, error)
+	GetAll() (*task.List, error)
+	GetByDate(date string) (*task.List, error)
+	GetByTitleOrComment(search string) (*task.List, error)
 	GetById(id int) (*task.Task, error)
 	DeleteById(id int) error
 	UpdateById(t *task.Task) (*task.Task, error)
@@ -147,17 +147,17 @@ func (ts *TaskService) Create(t *task.Task) (string, error) {
 	return id, nil
 }
 
-func (ts *TaskService) GetAll(search string, limit int) (*task.List, error) {
+func (ts *TaskService) GetAll(search string) (*task.List, error) {
 	if search != "" {
 		_, err := time.Parse("02.01.2006", search)
 		if err == nil {
-			return ts.taskRepository.GetByDate(search, limit)
+			return ts.taskRepository.GetByDate(search)
 		}
 
-		return ts.taskRepository.GetByTitleOrComment(search, limit)
+		return ts.taskRepository.GetByTitleOrComment(search)
 	}
 
-	taskList, err := ts.taskRepository.GetAll(limit)
+	taskList, err := ts.taskRepository.GetAll()
 	if err != nil {
 		return nil, err
 	}

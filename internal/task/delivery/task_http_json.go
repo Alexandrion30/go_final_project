@@ -10,7 +10,7 @@ import (
 type ServiceInterface interface {
 	NextDate(now string, date string, repeat string) (error, string)
 	Create(t *task.Task) (string, error)
-	GetAll(search string, limit int) (*task.List, error)
+	GetAll(search string) (*task.List, error)
 	GetById(id int) (*task.Task, error)
 	Update(t *task.Task) (*task.Task, error)
 	Delete(id int) error
@@ -69,14 +69,7 @@ func (th *TaskHttp) Create(w http.ResponseWriter, r *http.Request) {
 
 func (th *TaskHttp) GetList(w http.ResponseWriter, r *http.Request) {
 	search := r.FormValue("search")
-	limit, err := strconv.Atoi(r.FormValue("limit"))
-	if err != nil {
-		errorResponse := ErrorResponse{Error: err.Error()}
-		writeResponse(errorResponse, w, true)
-		return
-	}
-
-	taskList, err := th.service.GetAll(search, limit)
+	taskList, err := th.service.GetAll(search)
 	if err != nil {
 		errorResponse := ErrorResponse{Error: err.Error()}
 		writeResponse(errorResponse, w, true)
